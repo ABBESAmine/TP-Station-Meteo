@@ -15,20 +15,10 @@ const humMeta = $("#humMeta");
 const unitPill = $("#unitPill");
 const payloadEl = $("#payload");
 
-const modeLiveBtn = $("#modeLive");
-const modeSimBtn = $("#modeSim");
-const liveControls = $("#liveControls");
-const simControls = $("#simControls");
-
 const wsUrlInput = $("#wsUrl");
 const connectBtn = $("#connectBtn");
 
-const simToggleBtn = $("#simToggle");
-const simUnitBtn = $("#simUnit");
-const simRateInput = $("#simRate");
-const simRateLabel = $("#simRateLabel");
-
-const STORAGE_KEY = "tp-station-meteo-ui:v2";
+const STORAGE_KEY = "tp-station-meteo-ui:v3";
 
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 const round1 = (n) => Math.round(n * 10) / 10;
@@ -75,13 +65,9 @@ const normalizeMessage = (data) => {
 };
 
 const state = {
-  mode: "live",
   wsUrl: "ws://localhost:8080",
   ws: null,
   connected: false,
-  simTimer: null,
-  simRunning: false,
-  simRateMs: 1000,
   unit: "C",
   lastTempC: null,
   lastHum: null
@@ -91,8 +77,6 @@ const loadState = () => {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
     if (saved.wsUrl) state.wsUrl = String(saved.wsUrl);
-    if (saved.mode === "live" || saved.mode === "sim") state.mode = saved.mode;
-    if (Number.isFinite(saved.simRateMs)) state.simRateMs = clamp(saved.simRateMs, 500, 5000);
   } catch {}
 };
 
@@ -100,9 +84,7 @@ const saveState = () => {
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
-      wsUrl: state.wsUrl,
-      mode: state.mode,
-      simRateMs: state.simRateMs
+      wsUrl: state.wsUrl
     })
   );
 };
@@ -204,107 +186,17 @@ const connectWs = () => {
   });
 };
 
-const stopSim = () => {
-  if (state.simTimer) clearInterval(state.simTimer);
-  state.simTimer = null;
-  state.simRunning = false;
-  simToggleBtn.textContent = "Démarrer";
-};
-
-const randomWalk = (value, delta, min, max) => {
-  const next = value + (Math.random() * 2 - 1) * delta;
-  return clamp(next, min, max);
-};
-
-const simTick = () => {
-  const baseTempC = state.lastTempC ?? 21;
-  const baseHum = state.lastHum ?? 45;
-
-  const tempC = randomWalk(baseTempC, 0.3, 16, 30);
-  const hum = randomWalk(baseHum, 1.2, 25, 80);
-
-  const outTemp = state.unit === "C" ? tempC : cToF(tempC);
-  applyMessage({
-    temperature: round1(outTemp),
-    humidity: round1(hum),
-    unit: state.unit,
-    raw: {
-      temperature: round1(outTemp),
-      humidity: round1(hum),
-      unit: state.unit,
-      simulation: true
-    }
-  });
-};
-
-const startSim = () => {
-  stopSim();
-  disconnectWs();
-  state.simRunning = true;
-  simToggleBtn.textContent = "Arrêter";
-  setStatus("ok", "Simulation");
-  simTick();
-  state.simTimer = setInterval(simTick, state.simRateMs);
-};
-
-const setMode = (mode) => {
-  state.mode = mode;
-  saveState();
-
-  const live = mode === "live";
-  modeLiveBtn.classList.toggle("isActive", live);
-  modeSimBtn.classList.toggle("isActive", !live);
-  liveControls.classList.toggle("hidden", !live);
-  simControls.classList.toggle("hidden", live);
-
-  if (live) {
-    stopSim();
-    setStatus(state.connected ? "ok" : "warn", state.connected ? "Connecté" : "Hors ligne");
-  } else {
-    disconnectWs();
-    setStatus("ok", state.simRunning ? "Simulation" : "Simulation prête");
-  }
-};
-
 const init = () => {
   loadState();
 
   wsUrlInput.value = state.wsUrl;
-  simRateInput.value = String(state.simRateMs);
-  simRateLabel.textContent = String(state.simRateMs);
 
   connectBtn.addEventListener("click", () => {
     if (state.ws) disconnectWs();
     else connectWs();
   });
 
-  modeLiveBtn.addEventListener("click", () => setMode("live"));
-  modeSimBtn.addEventListener("click", () => setMode("sim"));
-
-  simRateInput.addEventListener("input", () => {
-    state.simRateMs = clamp(Number(simRateInput.value), 500, 5000);
-    simRateLabel.textContent = String(state.simRateMs);
-    saveState();
-    if (state.simRunning) startSim();
-  });
-
-  simToggleBtn.addEventListener("click", () => {
-    if (state.simRunning) {
-      stopSim();
-      setStatus("ok", "Simulation prête");
-    } else {
-      startSim();
-    }
-  });
-
-  simUnitBtn.addEventListener("click", () => {
-    state.unit = state.unit === "C" ? "F" : "C";
-    render();
-    if (state.simRunning) simTick();
-  });
-
   render();
-  setMode(state.mode);
   setStatus("warn", "Hors ligne");
 };
 

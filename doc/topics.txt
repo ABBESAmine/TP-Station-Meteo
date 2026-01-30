@@ -7,4 +7,4 @@ Broker:
 
 Topics utilisés:
 
-weather/goat/data
+goat/data

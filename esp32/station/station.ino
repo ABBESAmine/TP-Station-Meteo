@@ -14,96 +14,157 @@
  ***************************************************/
 
 #include <Arduino.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
 
 /* ========== GPIO ========== */
-#define PINBUTTON 18   // Bouton
-#define LED_C 26       // LED Celsius
-#define LED_F 27       // LED Fahrenheit
+#define PINBUTTON 18
+#define LED_C 26
+#define LED_F 27
+
+/* ========== WIFI ========== */
+const char* ssid = "Hamahoullah";
+const char* password = "foumalade";
+
+/* ========== MQTT ========== */
+const char* mqtt_server = "captain.dev0.pandor.cloud/goat/data";
+const int mqtt_port = 1884;
+
+
+const char* topic_temp = "station/meteo/temperature";
+ 
+
+WiFiClient espClient;
+PubSubClient client(espClient);
 
 /* ========== ETAT ========== */
-bool isCelsius = true;        // unité actuelle
+bool isCelsius = true;
 
-// Variables pour debounce fiable
-int lastReading = HIGH;       // dernière lecture brute du bouton
-int stableState = HIGH;       // état stable après debounce
+int lastReading = HIGH;
+int stableState = HIGH;
 unsigned long lastChangeTime = 0;
-const unsigned long debounceMs = 40;  // délai de stabilisation
+const unsigned long debounceMs = 40;
 
 unsigned long lastPrint = 0;
 
 /* ========== DONNEES SIMULEES ========== */
 float fakeTemperature() {
-  return random(180, 300) / 10.0; // 18.0 à 30.0
+  return random(180, 300) / 10.0;
 }
 
 float fakeHumidity() {
-  return random(300, 700) / 10.0; // 30% à 70%
+  return random(300, 700) / 10.0;
 }
 
 /* ========== LED ========== */
 void updateLEDs() {
-  // Une seule LED allumée selon l’unité
   digitalWrite(LED_C, isCelsius ? HIGH : LOW);
   digitalWrite(LED_F, isCelsius ? LOW : HIGH);
+}
+
+/* ========== MQTT CALLBACK (BONUS) ========== */
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  String msg;
+  for (unsigned int i = 0; i < length; i++) {
+    msg += (char)payload[i];
+  }
+
+  Serial.print("MQTT reçu [");
+  Serial.print(topic);
+  Serial.print("] : ");
+  Serial.println(msg);
+
+  if (String(topic) == topic_unit) {
+    if (msg == "C") isCelsius = true;
+    if (msg == "F") isCelsius = false;
+    updateLEDs();
+  }
+}
+
+/* ========== WIFI ========== */
+void setupWiFi() {
+  Serial.print("Connexion WiFi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connecté !");
+}
+
+/* ========== MQTT ========== */
+void reconnectMQTT() {
+  while (!client.connected()) {
+    Serial.print("Connexion MQTT...");
+    if (client.connect("ESP32_Meteo")) {
+      Serial.println("connecté !");
+      client.subscribe(topic_unit); // bonus
+    } else {
+      Serial.print("échec, rc=");
+      Serial.println(client.state());
+      delay(2000);
+    }
+  }
 }
 
 /* ========== SETUP ========== */
 void setup() {
   Serial.begin(115200);
-  Serial.println("=== MODE SIMULATION DEMARRE ===");
+  Serial.println("=== MODE SIMULATION + MQTT ===");
 
-  pinMode(PINBUTTON, INPUT_PULLUP); // bouton vers GND
+  pinMode(PINBUTTON, INPUT_PULLUP);
   pinMode(LED_C, OUTPUT);
   pinMode(LED_F, OUTPUT);
 
-  // LED initiale
-  isCelsius = true;
   updateLEDs();
+
+  setupWiFi();
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(mqttCallback);
 }
 
-/* ========== LOOP PRINCIPALE ========== */
+/* ========== LOOP ========== */
 void loop() {
-  // Lecture du bouton
-  int reading = digitalRead(PINBUTTON);
+  if (!client.connected()) reconnectMQTT();
+  client.loop();
 
-  // Détection de changement brut
+  // --- Gestion bouton ---
+  int reading = digitalRead(PINBUTTON);
   if (reading != lastReading) {
     lastChangeTime = millis();
     lastReading = reading;
   }
 
-  // Validation après stabilité
   if (millis() - lastChangeTime > debounceMs) {
     if (stableState != reading) {
       stableState = reading;
-
-      // Toggle uniquement si bouton pressé (LOW)
       if (stableState == LOW) {
         isCelsius = !isCelsius;
         updateLEDs();
-
-        // Debug Serial
-        Serial.print("Button pressed! LED_C=");
-        Serial.print(isCelsius ? "ON" : "OFF");
-        Serial.print(", LED_F=");
-        Serial.println(!isCelsius ? "ON" : "OFF");
       }
     }
   }
 
-  /* ---- AFFICHAGE DES DONNEES SIMULEES ---- */
+  // --- Publication MQTT ---
   if (millis() - lastPrint > 3000) {
     float temperature = fakeTemperature();
     float humidity = fakeHumidity();
 
     if (!isCelsius) temperature = temperature * 9 / 5 + 32;
 
-    Serial.print("Température : ");
-    Serial.print(temperature);
+    char tempStr[10];
+    char humStr[10];
+    dtostrf(temperature, 4, 1, tempStr);
+    dtostrf(humidity, 4, 1, humStr);
+
+    client.publish(topic_temp, tempStr);
+    client.publish(topic_hum, humStr);
+
+    Serial.print("MQTT -> Temp: ");
+    Serial.print(tempStr);
     Serial.print(isCelsius ? " °C" : " °F");
-    Serial.print(" | Humidité : ");
-    Serial.print(humidity);
-    Serial.println(" %");
+    Serial.print(" | Hum: ");
+    Serial.println(humStr);
 
     lastPrint = millis();
   }

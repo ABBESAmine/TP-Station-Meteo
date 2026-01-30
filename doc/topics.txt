@@ -1,0 +1,10 @@
+# MQTT Topics – Station météo (Parcours A)
+
+Broker:
+- Host: captain.dev0.pandor.cloud
+- Port: 1884
+- Auth: none
+
+Topics utilisés:
+
+weather/goat/data

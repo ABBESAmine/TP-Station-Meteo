@@ -1,171 +1,152 @@
-/***************************************************
- * TP STATION METEO CONNECTEE - ESP32
- * STEP 2 : MODE SIMULATION UNIQUEMENT
- *
- * Ce code NE FAIT QUE :
- * - Simuler température + humidité
- * - Gérer un bouton avec anti-rebond fiable
- * - Allumer une LED selon l’unité
- * - Afficher les valeurs en local (Serial Monitor)
- *
- *
- *
- *
- ***************************************************/
-
-#include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
 
-/* ========== GPIO ========== */
-#define PINBUTTON 18
-#define LED_C 26
-#define LED_F 27
+// ---------------- CONFIG ----------------
+#define BUTTON 18
+#define LED_C  26
+#define LED_F  27
 
-/* ========== WIFI ========== */
-const char* ssid = "Hamahoullah";
-const char* password = "foumalade";
+const char* WIFI_SSID     = "Wifiamine";
+const char* WIFI_PASSWORD = "Amine2004";
 
-/* ========== MQTT ========== */
-const char* mqtt_server = "captain.dev0.pandor.cloud/goat/data";
-const int mqtt_port = 1884;
+const char* MQTT_SERVER   = "captain.dev0.pandor.cloud";
+const int   MQTT_PORT     = 1884;
+const char* MQTT_TOPIC    = "goat/data";
 
+const unsigned long PUBLISH_INTERVAL_MS = 5000;
+const unsigned long DEBOUNCE_MS        = 50;
+const unsigned long MQTT_RETRY_MS      = 5000;
 
-const char* topic_temp = "station/meteo/temperature";
- 
-
+// ---------------- VARIABLES ----------------
 WiFiClient espClient;
-PubSubClient client(espClient);
+PubSubClient mqttClient(espClient);
 
-/* ========== ETAT ========== */
-bool isCelsius = true;
+bool modeCelsius = true;
 
-int lastReading = HIGH;
-int stableState = HIGH;
-unsigned long lastChangeTime = 0;
-const unsigned long debounceMs = 40;
+int lastButtonReading = HIGH;
+int stableButtonState = HIGH;
+unsigned long lastButtonChange = 0;
 
-unsigned long lastPrint = 0;
+unsigned long lastPublish = 0;
+unsigned long lastMqttTry  = 0;
 
-/* ========== DONNEES SIMULEES ========== */
-float fakeTemperature() {
-  return random(180, 300) / 10.0;
-}
-
-float fakeHumidity() {
-  return random(300, 700) / 10.0;
-}
-
-/* ========== LED ========== */
-void updateLEDs() {
-  digitalWrite(LED_C, isCelsius ? HIGH : LOW);
-  digitalWrite(LED_F, isCelsius ? LOW : HIGH);
-}
-
-/* ========== MQTT CALLBACK (BONUS) ========== */
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  String msg;
-  for (unsigned int i = 0; i < length; i++) {
-    msg += (char)payload[i];
-  }
-
-  Serial.print("MQTT reçu [");
-  Serial.print(topic);
-  Serial.print("] : ");
-  Serial.println(msg);
-
-  if (String(topic) == topic_unit) {
-    if (msg == "C") isCelsius = true;
-    if (msg == "F") isCelsius = false;
-    updateLEDs();
-  }
-}
-
-/* ========== WIFI ========== */
-void setupWiFi() {
-  Serial.print("Connexion WiFi...");
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi connecté !");
-}
-
-/* ========== MQTT ========== */
-void reconnectMQTT() {
-  while (!client.connected()) {
-    Serial.print("Connexion MQTT...");
-    if (client.connect("ESP32_Meteo")) {
-      Serial.println("connecté !");
-      client.subscribe(topic_unit); // bonus
-    } else {
-      Serial.print("échec, rc=");
-      Serial.println(client.state());
-      delay(2000);
-    }
-  }
-}
-
-/* ========== SETUP ========== */
+// ---------------- SETUP ----------------
 void setup() {
   Serial.begin(115200);
-  Serial.println("=== MODE SIMULATION + MQTT ===");
+  delay(300);
 
-  pinMode(PINBUTTON, INPUT_PULLUP);
+  pinMode(BUTTON, INPUT_PULLUP);
   pinMode(LED_C, OUTPUT);
   pinMode(LED_F, OUTPUT);
 
+  modeCelsius = true;
   updateLEDs();
 
-  setupWiFi();
-  client.setServer(mqtt_server, mqtt_port);
-  client.setCallback(mqttCallback);
+  Serial.println("=== Station Meteo (simulation) ===");
+  randomSeed(esp_random());
+
+  connectWiFi();
+  mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+  mqttClient.setBufferSize(512);
+
+  tryMqttConnect();
+  if (mqttClient.connected()) publishData();
 }
 
-/* ========== LOOP ========== */
+// ---------------- LOOP ----------------
 void loop() {
-  if (!client.connected()) reconnectMQTT();
-  client.loop();
+  handleButton();
+  updateLEDs();
 
-  // --- Gestion bouton ---
-  int reading = digitalRead(PINBUTTON);
-  if (reading != lastReading) {
-    lastChangeTime = millis();
-    lastReading = reading;
+  if (!mqttClient.connected()) tryMqttConnect();
+  mqttClient.loop();
+
+  if (millis() - lastPublish >= PUBLISH_INTERVAL_MS) {
+    lastPublish = millis();
+    publishData();
+  }
+}
+
+// ---------------- WIFI ----------------
+void connectWiFi() {
+  Serial.print("WiFi ");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  int n = 0;
+  while (WiFi.status() != WL_CONNECTED && n < 24) {
+    delay(500);
+    Serial.print(".");
+    n++;
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println(" OK");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println(" timeout");
+  }
+}
+
+// ---------------- MQTT (non bloquant) ----------------
+void tryMqttConnect() {
+  if (mqttClient.connected()) return;
+  if (WiFi.status() != WL_CONNECTED) return;
+  if (lastMqttTry != 0 && (millis() - lastMqttTry < MQTT_RETRY_MS)) return;
+
+  lastMqttTry = millis();
+  Serial.print("MQTT ");
+  String id = "esp32-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+  if (mqttClient.connect(id.c_str())) {
+    Serial.println(" OK");
+  } else {
+    Serial.print(" fail ");
+    Serial.println(mqttClient.state());
+  }
+}
+
+// ---------------- BOUTON : un seul toggle par appui ----------------
+void handleButton() {
+  int r = digitalRead(BUTTON);
+
+  if (r != lastButtonReading) {
+    lastButtonChange = millis();
+    lastButtonReading = r;
   }
 
-  if (millis() - lastChangeTime > debounceMs) {
-    if (stableState != reading) {
-      stableState = reading;
-      if (stableState == LOW) {
-        isCelsius = !isCelsius;
-        updateLEDs();
-      }
-    }
+  if (millis() - lastButtonChange < DEBOUNCE_MS) return;
+
+  if (stableButtonState == r) return;
+  stableButtonState = r;
+
+  if (stableButtonState == LOW) {
+    modeCelsius = !modeCelsius;
+    Serial.println(modeCelsius ? "Mode: C" : "Mode: F");
+    if (mqttClient.connected()) publishData();
   }
+}
 
-  // --- Publication MQTT ---
-  if (millis() - lastPrint > 3000) {
-    float temperature = fakeTemperature();
-    float humidity = fakeHumidity();
+void updateLEDs() {
+  digitalWrite(LED_C, modeCelsius ? HIGH : LOW);
+  digitalWrite(LED_F, modeCelsius ? LOW : HIGH);
+}
 
-    if (!isCelsius) temperature = temperature * 9 / 5 + 32;
+// ---------------- PUBLISH (format doc/example.json, simulation) ----------------
+void publishData() {
+  if (!mqttClient.connected()) return;
 
-    char tempStr[10];
-    char humStr[10];
-    dtostrf(temperature, 4, 1, tempStr);
-    dtostrf(humidity, 4, 1, humStr);
+  float tempC = random(180, 301) / 10.0f;
+  float hum   = random(300, 701) / 10.0f;
+  float tempF = tempC * 9.0f / 5.0f + 32.0f;
+  unsigned long ts = millis() / 1000;
 
-    client.publish(topic_temp, tempStr);
-    client.publish(topic_hum, humStr);
+  String json = "{";
+  json += "\"temperature\":{\"celsius\":" + String(tempC, 1) + ",\"fahrenheit\":" + String(tempF, 1) + "},";
+  json += "\"humidity\":" + String(hum, 1) + ",";
+  json += "\"unit\":\"" + String(modeCelsius ? "C" : "F") + "\",";
+  json += "\"simulation\":true,";
+  json += "\"timestamp\":" + String(ts) + "}";
 
-    Serial.print("MQTT -> Temp: ");
-    Serial.print(tempStr);
-    Serial.print(isCelsius ? " °C" : " °F");
-    Serial.print(" | Hum: ");
-    Serial.println(humStr);
-
-    lastPrint = millis();
-  }
+  mqttClient.publish(MQTT_TOPIC, json.c_str());
+  Serial.print("MQTT ");
+  Serial.println(json);
 }

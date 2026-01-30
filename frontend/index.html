@@ -4,12 +4,79 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Station météo</title>
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="Station météo connectée — température et humidité en temps réel.">
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <h1>Station météo</h1>
-  <p>Température: <span id="temp">--</span></p>
-  <p>Humidité: <span id="humidity">--</span> %</p>
-  <p>Unité: <span id="unit">--</span></p>
-  <!-- TODO: connexion WebSocket, affichage temps réel -->
+  <div class="container">
+    <header class="header">
+      <div>
+        <h1>STATION MÉTÉO</h1>
+        <p class="small">Température / humidité en temps réel</p>
+      </div>
+      <div class="status">
+        <span class="badge" id="statusText">Hors ligne</span>
+        <span class="small" id="lastUpdate">—</span>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card">
+        <h2>Température</h2>
+        <div class="value">
+          <span class="number" id="tempValue">—</span>
+          <span class="unit" id="tempUnit">°C</span>
+        </div>
+        <div class="small" id="tempMeta">—</div>
+      </section>
+
+      <section class="card">
+        <h2>Humidité</h2>
+        <div class="value">
+          <span class="number" id="humValue">—</span>
+          <span class="unit">%</span>
+        </div>
+        <div class="small" id="humMeta">—</div>
+      </section>
+
+      <section class="card">
+        <h2>Mode</h2>
+        <div class="tabs">
+          <button id="modeLive" class="tab isActive" type="button">Live</button>
+          <button id="modeSim" class="tab" type="button">Simulation</button>
+        </div>
+
+        <div id="liveControls" class="block">
+          <label class="label" for="wsUrl">URL WebSocket</label>
+          <input class="input" id="wsUrl" type="url" spellcheck="false" inputmode="url" placeholder="ws://localhost:8080" />
+          <div class="row">
+            <button class="btn" id="connectBtn" type="button">Connexion</button>
+            <span class="small">Unité: <strong id="unitPill">—</strong></span>
+          </div>
+        </div>
+
+        <div id="simControls" class="block hidden">
+          <div class="row">
+            <button class="btn" id="simToggle" type="button">Démarrer</button>
+            <button class="btn secondary" id="simUnit" type="button">Basculer °C/°F</button>
+          </div>
+          <label class="label" for="simRate">Fréquence: <span id="simRateLabel">1000</span> ms</label>
+          <input class="input" id="simRate" type="range" min="500" max="5000" step="100" value="1000" />
+        </div>
+
+        <details class="details">
+          <summary>Dernier message reçu</summary>
+          <pre class="payload" id="payload">—</pre>
+        </details>
+      </section>
+    </main>
+
+    <footer class="footer small">
+      Les rois d'Afrique pour vous servir : Amine - Issa - Mikael - Drame - Daniel 
+    </footer>
+  </div>
+
+  <script type="module" src="./app.js"></script>
 </body>
 </html>

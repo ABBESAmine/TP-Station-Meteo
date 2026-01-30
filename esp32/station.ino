@@ -14,6 +14,7 @@
  ***************************************************/
 
 #include <Arduino.h>
+
 /* ========== GPIO ========== */
 #define PINBUTTON 18   // Bouton
 #define LED_C 26       // LED Celsius
@@ -26,61 +27,61 @@ const unsigned long debounceDelay = 300;
 unsigned long lastPrint = 0;
 
 /* ========== DONNEES SIMULEES ========== */
-// Génère une température réaliste
 float fakeTemperature() {
   return random(180, 300) / 10.0; // 18.0 à 30.0
 }
 
-// Génère une humidité réaliste
 float fakeHumidity() {
   return random(300, 700) / 10.0; // 30% à 70%
 }
 
 /* ========== LED ========== */
-// Met à jour les LEDs selon l’unité
 void updateLEDs() {
+  // Une seule LED allumée selon l’unité
   digitalWrite(LED_C, isCelsius ? HIGH : LOW);
   digitalWrite(LED_F, isCelsius ? LOW : HIGH);
 }
 
 /* ========== SETUP ========== */
 void setup() {
-  // Initialisation Serial pour voir les valeurs
   Serial.begin(115200);
   Serial.println("=== MODE SIMULATION DEMARRE ===");
 
   // Configuration des pins
-  pinMode(PINBUTTON, INPUT_PULLUP);
+  pinMode(PINBUTTON, INPUT_PULLUP); // bouton vers GND
   pinMode(LED_C, OUTPUT);
   pinMode(LED_F, OUTPUT);
 
-  updateLEDs(); // LED initiale
+  // LED initiale
+  isCelsius = true;
+  updateLEDs();
 }
 
-/* ========== LOOP ========== */
+/* ========== LOOP PRINCIPALE ========== */
 void loop() {
 
   /* ---- BOUTON AVEC ANTI-REBOUND ---- */
   if (digitalRead(PINBUTTON) == LOW) {
     if (millis() - lastButtonTime > debounceDelay) {
       isCelsius = !isCelsius;   // bascule unité
-      updateLEDs();
+      updateLEDs();             // met à jour LEDs
       lastButtonTime = millis();
+
+      // Debug
+      Serial.print("Button pressed! LED_C=");
+      Serial.print(isCelsius ? "ON" : "OFF");
+      Serial.print(", LED_F=");
+      Serial.println(!isCelsius ? "ON" : "OFF");
     }
   }
 
   /* ---- AFFICHAGE DES DONNEES SIMULEES ---- */
   if (millis() - lastPrint > 3000) {
-
     float temperature = fakeTemperature();
     float humidity = fakeHumidity();
 
-    // Conversion en Fahrenheit si besoin
-    if (!isCelsius) {
-      temperature = temperature * 9 / 5 + 32;
-    }
+    if (!isCelsius) temperature = temperature * 9 / 5 + 32;
 
-    // Affichage local
     Serial.print("Température : ");
     Serial.print(temperature);
     Serial.print(isCelsius ? " °C" : " °F");

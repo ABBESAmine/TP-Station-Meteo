@@ -4,13 +4,13 @@
  *
  * Ce code NE FAIT QUE :
  * - Simuler température + humidité
- * - Gérer un bouton avec anti-rebond
+ * - Gérer un bouton avec anti-rebond fiable
  * - Allumer une LED selon l’unité
  * - Afficher les valeurs en local (Serial Monitor)
  *
- * PAS de WiFi
- * PAS de MQTT
- * PAS de DHT22
+ *
+ *
+ *
  ***************************************************/
 
 #include <Arduino.h>
@@ -22,8 +22,13 @@
 
 /* ========== ETAT ========== */
 bool isCelsius = true;        // unité actuelle
-unsigned long lastButtonTime = 0;
-const unsigned long debounceDelay = 300;
+
+// Variables pour debounce fiable
+int lastReading = HIGH;       // dernière lecture brute du bouton
+int stableState = HIGH;       // état stable après debounce
+unsigned long lastChangeTime = 0;
+const unsigned long debounceMs = 40;  // délai de stabilisation
+
 unsigned long lastPrint = 0;
 
 /* ========== DONNEES SIMULEES ========== */
@@ -47,7 +52,6 @@ void setup() {
   Serial.begin(115200);
   Serial.println("=== MODE SIMULATION DEMARRE ===");
 
-  // Configuration des pins
   pinMode(PINBUTTON, INPUT_PULLUP); // bouton vers GND
   pinMode(LED_C, OUTPUT);
   pinMode(LED_F, OUTPUT);
@@ -59,19 +63,31 @@ void setup() {
 
 /* ========== LOOP PRINCIPALE ========== */
 void loop() {
+  // Lecture du bouton
+  int reading = digitalRead(PINBUTTON);
 
-  /* ---- BOUTON AVEC ANTI-REBOUND ---- */
-  if (digitalRead(PINBUTTON) == LOW) {
-    if (millis() - lastButtonTime > debounceDelay) {
-      isCelsius = !isCelsius;   // bascule unité
-      updateLEDs();             // met à jour LEDs
-      lastButtonTime = millis();
+  // Détection de changement brut
+  if (reading != lastReading) {
+    lastChangeTime = millis();
+    lastReading = reading;
+  }
 
-      // Debug
-      Serial.print("Button pressed! LED_C=");
-      Serial.print(isCelsius ? "ON" : "OFF");
-      Serial.print(", LED_F=");
-      Serial.println(!isCelsius ? "ON" : "OFF");
+  // Validation après stabilité
+  if (millis() - lastChangeTime > debounceMs) {
+    if (stableState != reading) {
+      stableState = reading;
+
+      // Toggle uniquement si bouton pressé (LOW)
+      if (stableState == LOW) {
+        isCelsius = !isCelsius;
+        updateLEDs();
+
+        // Debug Serial
+        Serial.print("Button pressed! LED_C=");
+        Serial.print(isCelsius ? "ON" : "OFF");
+        Serial.print(", LED_F=");
+        Serial.println(!isCelsius ? "ON" : "OFF");
+      }
     }
   }
 

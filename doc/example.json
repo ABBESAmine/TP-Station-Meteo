@@ -1,0 +1,10 @@
+{
+    "temperature": {
+        "celsius": 22.2,
+        "fahrenheit": 71.9
+    },
+    "humidity": 44.1,
+    "unit": "F",
+    "simulation": true,
+    "timestamp": 12
+}
